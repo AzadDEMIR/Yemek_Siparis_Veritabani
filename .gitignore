@@ -1,0 +1,23 @@
+# Visual Studio / SSMS
+.vs/
+*.suo
+*.user
+*.userprefs
+
+# SQL Server backup / output
+*.bak
+*.bacpac
+*.dacpac
+*.ldf
+*.mdf
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+*.swp
+*~
+
+# Logs
+*.log

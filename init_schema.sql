@@ -1,5 +1,19 @@
 -- Çevrimiçi Yemek Sipariş Platformu - Veritabanı Oluşturma Scripti (DDL)
 
+-- =====================================================================
+-- VERİTABANI OLUŞTURMA
+-- =====================================================================
+-- Eğer YemekSiparis veritabanı yoksa oluştur. (IF NOT EXISTS — script tekrar çalıştırılırsa hata vermez.)
+IF DB_ID(N'YemekSiparis') IS NULL
+BEGIN
+    CREATE DATABASE YemekSiparis;
+END
+GO
+
+-- Tabloları oluştururken hangi veritabanı içinde çalıştığımızı belirt.
+USE YemekSiparis;
+GO
+
 -- 1. Users Tablosu
 -- Müşteri, Restoran Kurum/Yetkilisi ve Kurye gibi tüm kullanıcı tiplerini ortak bir tabloda tutar.
 CREATE TABLE Users (
@@ -19,6 +33,7 @@ CREATE TABLE Restaurants (
     Name VARCHAR(100) NOT NULL,
     Address VARCHAR(255) NOT NULL,
     Rating DECIMAL(3,2) CHECK (Rating >= 1.00 AND Rating <= 5.00), -- 1 ile 5 arasında kısıtlama
+    TotalRevenue DECIMAL(18,2) NOT NULL DEFAULT 0.00, -- Teslim edilen siparişlerden biriken ciro (Trigger ile güncellenir)
     IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete
 );
 
@@ -49,6 +64,7 @@ CREATE TABLE Orders (
     OrderID       INT PRIMARY KEY IDENTITY(1,1),
     CustomerID    INT NOT NULL,                               -- Hangi müşteriye ait
     RestaurantID  INT NOT NULL,                               -- Hangi restorandan verildi
+    CourierID     INT NULL,                                   -- Atanan kurye (sipariş yola çıkana kadar NULL olabilir)
     OrderDate     DATETIME NOT NULL DEFAULT GETDATE(),        -- Varsayılan: oluşturulma anı
     TotalAmount   DECIMAL(10,2) NOT NULL CHECK (TotalAmount >= 0), -- Negatif tutar olamaz
     OrderStatus   VARCHAR(50) NOT NULL DEFAULT 'Alındı'
@@ -58,7 +74,8 @@ CREATE TABLE Orders (
 
     -- Foreign Key Constraints
     CONSTRAINT FK_Orders_Customers    FOREIGN KEY (CustomerID)   REFERENCES Users(UserID),
-    CONSTRAINT FK_Orders_Restaurants  FOREIGN KEY (RestaurantID) REFERENCES Restaurants(RestaurantID)
+    CONSTRAINT FK_Orders_Restaurants  FOREIGN KEY (RestaurantID) REFERENCES Restaurants(RestaurantID),
+    CONSTRAINT FK_Orders_Couriers     FOREIGN KEY (CourierID)    REFERENCES Users(UserID)
 );
 
 -- 6. OrderDetails Tablosu
@@ -89,3 +106,25 @@ CREATE TABLE Donations (
     -- Foreign Key Constraint (NULL değer FK kuralını ihlal etmez, anonim bağışa izin verir)
     CONSTRAINT FK_Donations_Donors FOREIGN KEY (DonorID) REFERENCES Users(UserID)
 );
+GO
+
+-- =====================================================================
+-- INDEX'LER (Primary Key dışında performans için tanımlanan indeksler)
+-- =====================================================================
+-- Yönerge gereği en az 2 anlamlı, PK harici index olmalı. Aşağıda 4 adet tanımlandı.
+
+-- 1) Sipariş tarihine göre raporlama (son X gün, ay sonu vb.) çok sık yapılır.
+--    Tarih bazlı WHERE/ORDER BY sorgularını hızlandırır.
+CREATE INDEX IX_Orders_OrderDate    ON Orders(OrderDate);
+
+-- 2) Bir müşterinin sipariş geçmişi (WHERE CustomerID = ?) çok sık çekilir.
+--    FK kolonu olduğu için JOIN'lerde de hız kazandırır.
+CREATE INDEX IX_Orders_CustomerID   ON Orders(CustomerID);
+
+-- 3) Restoranın menüsünü çekerken Products tablosunda RestaurantID ile filtre yapılır.
+--    Aktif menüler view'unda da kullanıldığı için performansı doğrudan etkiler.
+CREATE INDEX IX_Products_Restaurant ON Products(RestaurantID);
+
+-- 4) Bağışların tarih bazlı raporlanması (aylık/haftalık) için.
+CREATE INDEX IX_Donations_Date      ON Donations(DonationDate);
+GO
