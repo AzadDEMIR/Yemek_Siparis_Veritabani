@@ -1,4 +1,4 @@
--- =====================================================================
+﻿-- =====================================================================
 -- AŞAMA 3 — VIEWS (Görünümler)
 -- =====================================================================
 -- Yönerge gereği karmaşık sorguları basitleştiren en az 2 adet View
@@ -58,7 +58,7 @@ SELECT
         FROM Orders AS o
         WHERE o.IsSuspendedOrder = 1
           AND o.IsActive         = 1
-          AND o.OrderStatus     <> 'İptal'
+          AND o.OrderStatus     <> N'İptal'
     )                                                          AS ToplamKullanim,
 
     (
@@ -72,7 +72,7 @@ SELECT
         FROM Orders AS o
         WHERE o.IsSuspendedOrder = 1
           AND o.IsActive         = 1
-          AND o.OrderStatus     <> 'İptal'
+          AND o.OrderStatus     <> N'İptal'
     )                                                          AS KalanBakiye;
 GO
 

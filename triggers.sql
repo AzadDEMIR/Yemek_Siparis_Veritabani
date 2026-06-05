@@ -1,4 +1,4 @@
--- =====================================================================
+﻿-- =====================================================================
 -- AŞAMA 4 — TRIGGERS (Tetikleyiciler)
 -- =====================================================================
 -- Yönerge gereği iş kurallarını otomatize eden en az 2 adet Trigger
@@ -55,8 +55,8 @@ BEGIN
                SUM(i.TotalAmount) AS EklenecekTutar
         FROM inserted AS i
         INNER JOIN deleted AS d ON d.OrderID = i.OrderID
-        WHERE i.OrderStatus = 'Teslim Edildi'    -- yeni durum: teslim
-          AND d.OrderStatus <> 'Teslim Edildi'   -- eski durum: teslim değildi
+        WHERE i.OrderStatus = N'Teslim Edildi'    -- yeni durum: teslim
+          AND d.OrderStatus <> N'Teslim Edildi'   -- eski durum: teslim değildi
         GROUP BY i.RestaurantID
     ) AS agg ON agg.RestaurantID = r.RestaurantID;
 END;
@@ -108,7 +108,7 @@ BEGIN
     IF @CurrentBalance IS NULL
     BEGIN
         ROLLBACK TRANSACTION;
-        THROW 50001, 'Askıda Yemek havuzu (PoolID=1) bulunamadı. Önce DonationPool kaydı oluşturulmalı.', 1;
+        THROW 50001, N'Askıda Yemek havuzu (PoolID=1) bulunamadı. Önce DonationPool kaydı oluşturulmalı.', 1;
         RETURN;
     END
 
@@ -116,7 +116,7 @@ BEGIN
     IF @CurrentBalance < @TotalNeeded
     BEGIN
         ROLLBACK TRANSACTION;
-        THROW 50002, 'Askıda Yemek havuz bakiyesi yetersiz. Sipariş reddedildi.', 1;
+        THROW 50002, N'Askıda Yemek havuz bakiyesi yetersiz. Sipariş reddedildi.', 1;
         RETURN;
     END
 

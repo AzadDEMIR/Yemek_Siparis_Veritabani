@@ -1,4 +1,4 @@
--- =====================================================================
+﻿-- =====================================================================
 -- AŞAMA 9 — İLERİ DÜZEY SORGULAR (DQL & Analitik)
 -- =====================================================================
 -- Yönerge 3. madde gereği aşağıdaki sorgular, ne işe yaradıkları açıklama
@@ -65,7 +65,7 @@ SELECT
 FROM Orders            AS o
 INNER JOIN Restaurants AS r ON r.RestaurantID = o.RestaurantID
 WHERE o.OrderDate >= DATEADD(DAY, -30, GETDATE())   -- son 1 ay
-  AND o.OrderStatus <> 'İptal'                       -- iptaller hariç
+  AND o.OrderStatus <> N'İptal'                       -- iptaller hariç
   AND o.IsActive = 1
 GROUP BY r.RestaurantID, r.Name
 HAVING COUNT(*) > 5                                   -- 5'ten fazla sipariş
@@ -86,7 +86,7 @@ SELECT
     u.Name      AS MusteriAdi,
     u.Email
 FROM Users AS u
-WHERE u.UserType = 'Müşteri'
+WHERE u.UserType = N'Müşteri'
   AND u.IsActive = 1
   AND EXISTS (
         SELECT 1 FROM Orders AS o
@@ -117,7 +117,7 @@ SELECT DISTINCT
 FROM Orders AS o
 INNER JOIN Users AS u ON u.UserID = o.CustomerID
 WHERE o.IsSuspendedOrder = 1
-  AND o.OrderStatus <> 'İptal'
+  AND o.OrderStatus <> N'İptal'
   AND o.IsActive = 1
   AND o.OrderDate >= DATEADD(DAY, -7, GETDATE())
 ORDER BY o.OrderDate DESC;
@@ -140,7 +140,7 @@ WHERE r.IsActive = 1
   AND r.RestaurantID IN (
         SELECT o.RestaurantID
         FROM Orders AS o
-        WHERE o.OrderStatus = 'Teslim Edildi'
+        WHERE o.OrderStatus = N'Teslim Edildi'
       )
 ORDER BY r.TotalRevenue DESC;
 GO

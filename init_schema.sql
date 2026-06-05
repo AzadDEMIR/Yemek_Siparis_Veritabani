@@ -1,4 +1,4 @@
--- Çevrimiçi Yemek Sipariş Platformu - Veritabanı Oluşturma Scripti (DDL)
+﻿-- Çevrimiçi Yemek Sipariş Platformu - Veritabanı Oluşturma Scripti (DDL)
 
 -- =====================================================================
 -- VERİTABANI OLUŞTURMA
@@ -18,10 +18,10 @@ GO
 -- Müşteri, Restoran Kurum/Yetkilisi ve Kurye gibi tüm kullanıcı tiplerini ortak bir tabloda tutar.
 CREATE TABLE Users (
     UserID INT PRIMARY KEY IDENTITY(1,1), -- MS SQL Server sözdizimi kullanılmıştır. (MySQL için AUTO_INCREMENT, PgSQL için SERIAL kullanabilirsiniz.)
-    Name VARCHAR(100) NOT NULL,
-    Email VARCHAR(150) UNIQUE NOT NULL,
-    Phone VARCHAR(20),
-    UserType VARCHAR(50) NOT NULL CHECK (UserType IN ('Müşteri', 'Restoran', 'Kurye')),
+    Name NVARCHAR(100) NOT NULL,
+    Email NVARCHAR(150) UNIQUE NOT NULL,
+    Phone NVARCHAR(20),
+    UserType NVARCHAR(50) NOT NULL CHECK (UserType IN (N'Müşteri', N'Restoran', N'Kurye')),
     IsVerified BIT NOT NULL DEFAULT 0, -- Hesap doğrulama durumu. 0: Doğrulanmamış, 1: Doğrulanmış (MySQL/PgSQL için BOOLEAN)
     IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete. 1: Aktif, 0: Silinmiş
 );
@@ -30,8 +30,8 @@ CREATE TABLE Users (
 -- Sisteme kayıtlı olan restoranların temel bilgilerini ve puanlarını tutar.
 CREATE TABLE Restaurants (
     RestaurantID INT PRIMARY KEY IDENTITY(1,1),
-    Name VARCHAR(100) NOT NULL,
-    Address VARCHAR(255) NOT NULL,
+    Name NVARCHAR(100) NOT NULL,
+    Address NVARCHAR(255) NOT NULL,
     Rating DECIMAL(3,2) CHECK (Rating >= 1.00 AND Rating <= 5.00), -- 1 ile 5 arasında kısıtlama
     TotalRevenue DECIMAL(18,2) NOT NULL DEFAULT 0.00, -- Teslim edilen siparişlerden biriken ciro (Trigger ile güncellenir)
     IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete
@@ -42,7 +42,7 @@ CREATE TABLE Restaurants (
 CREATE TABLE Products (
     ProductID INT PRIMARY KEY IDENTITY(1,1),
     RestaurantID INT NOT NULL,
-    ProductName VARCHAR(100) NOT NULL,
+    ProductName NVARCHAR(100) NOT NULL,
     Price DECIMAL(10,2) NOT NULL CHECK (Price > 0), -- Fiyatın 0'dan büyük olma zorunluluğu
     IsActive BIT NOT NULL DEFAULT 1,                -- Soft Delete
     
@@ -67,8 +67,8 @@ CREATE TABLE Orders (
     CourierID     INT NULL,                                   -- Atanan kurye (sipariş yola çıkana kadar NULL olabilir)
     OrderDate     DATETIME NOT NULL DEFAULT GETDATE(),        -- Varsayılan: oluşturulma anı
     TotalAmount   DECIMAL(10,2) NOT NULL CHECK (TotalAmount >= 0), -- Negatif tutar olamaz
-    OrderStatus   VARCHAR(50) NOT NULL DEFAULT 'Alındı'
-                      CHECK (OrderStatus IN ('Alındı', 'Hazırlanıyor', 'Yolda', 'Teslim Edildi', 'İptal')),
+    OrderStatus   NVARCHAR(50) NOT NULL DEFAULT N'Alındı'
+                      CHECK (OrderStatus IN (N'Alındı', N'Hazırlanıyor', N'Yolda', N'Teslim Edildi', N'İptal')),
     IsSuspendedOrder BIT NOT NULL DEFAULT 0,                  -- 0: Normal sipariş, 1: Askıda sipariş
     IsActive      BIT NOT NULL DEFAULT 1,                     -- Soft Delete
 
