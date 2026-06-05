@@ -1,40 +1,15 @@
-﻿-- =====================================================================
--- AŞAMA 4 — TRIGGERS (Tetikleyiciler)
--- =====================================================================
--- Yönerge gereği iş kurallarını otomatize eden en az 2 adet Trigger
--- yazılmalıdır. Aşağıda zorunlu 2 trigger bulunmaktadır.
---
--- MS SQL Server trigger notları (savunma için kritik):
---   - "inserted" sözde-tablosu: INSERT/UPDATE sonrası yeni satırlar.
---   - "deleted"  sözde-tablosu: DELETE/UPDATE öncesi eski satırlar.
---   - UPDATE'te BOTH inserted (yeni hal) + deleted (eski hal) dolu olur.
---   - Trigger'lar SET-BASED çalışır: tek INSERT/UPDATE birden çok satırı
---     etkileyebilir; bu yüzden cursor değil, JOIN/SUM kullanıyoruz.
+﻿-- TRIGGERS (Tetikleyiciler)
+-- inserted = yeni satırlar, deleted = eski satırlar. UPDATE'te ikisi de doludur.
+-- Trigger'lar set-based çalışır (tek işlem çok satır etkileyebilir).
 
 USE YemekSiparis;
 GO
 
--- ---------------------------------------------------------------------
--- 1) trg_OrderDelivered_UpdateRevenue
--- ---------------------------------------------------------------------
--- Amaç: Bir sipariş 'Teslim Edildi' statüsüne GEÇTİĞİNDE, ilgili
--- restoranın TotalRevenue sütununu sipariş tutarı kadar artırır.
---
--- Tetikleme: AFTER UPDATE (Orders üzerinde)
---
--- Mantık:
---   - inserted.OrderStatus = 'Teslim Edildi'  -> yeni durum
---   - deleted.OrderStatus  <> 'Teslim Edildi' -> önceki durum farklı
---   Bu iki koşul birlikte "yeni teslim edilen" siparişi tespit eder.
---   "Teslim Edildi" -> "Teslim Edildi" güncellemesi (idempotent UPDATE)
---   yanlışlıkla ciroyu ikiye katlamaz.
---
--- ÖNEMLİ (set-based doğruluk): Aynı UPDATE ifadesi, AYNI restorana ait
--- BİRDEN ÇOK siparişi birden 'Teslim Edildi' yapabilir (toplu güncelleme).
--- SQL Server'da "UPDATE ... FROM" çoka-bir join'de hedef satırı yalnızca
--- BİR eşleşen değerle günceller (tutarları TOPLAMAZ). Bu yüzden önce
--- inserted'ı RestaurantID'ye göre GROUP BY + SUM ile toplayıp, restoran
--- başına TEK bir toplam tutar üretiyoruz; ciroya onu ekliyoruz.
+-- trg_OrderDelivered_UpdateRevenue (AFTER UPDATE)
+-- Sipariş 'Teslim Edildi'ye GEÇİNCE restoranın TotalRevenue'sini artırır.
+-- inserted='Teslim Edildi' + deleted<>'Teslim Edildi' -> yeni teslim edilen.
+-- inserted'ı RestaurantID'ye göre GROUP BY+SUM ile topluyoruz; çünkü
+-- "UPDATE ... FROM" çoka-bir join'de tutarları toplamaz, birini alır.
 CREATE OR ALTER TRIGGER trg_OrderDelivered_UpdateRevenue
 ON Orders
 AFTER UPDATE
@@ -63,23 +38,10 @@ END;
 GO
 
 
--- ---------------------------------------------------------------------
--- 2) trg_SuspendedOrder_DeductPool
--- ---------------------------------------------------------------------
--- Amaç: "Askıda Yemek" siparişi (IsSuspendedOrder = 1) INSERT edildiğinde
--- DonationPool.TotalBalance (PoolID=1) sipariş tutarı kadar düşürülür.
--- Bakiye yetersizse THROW ile sipariş REDDEDİLİR (transaction rollback).
---
--- Tetikleme: AFTER INSERT (Orders üzerinde)
---
--- Set-based davranış:
---   - Aynı INSERT birden çok askıda sipariş içerebilir → tutarlar SUM ile
---     toplanır, havuzdan tek seferde düşülür.
---   - Normal (askıda olmayan) siparişler bu trigger'dan etkilenmez.
---
--- Hata kodları:
---   50001 → Havuz satırı yok (kurulum hatası).
---   50002 → Havuz bakiyesi yetersiz (iş kuralı ihlali).
+-- trg_SuspendedOrder_DeductPool (AFTER INSERT)
+-- Askıda sipariş (IsSuspendedOrder=1) eklenince havuzdan (PoolID=1) tutarını
+-- düşer. Bakiye yetersizse THROW ile siparişi reddeder (rollback).
+-- Hata kodları: 50001 havuz yok, 50002 bakiye yetersiz.
 CREATE OR ALTER TRIGGER trg_SuspendedOrder_DeductPool
 ON Orders
 AFTER INSERT
@@ -128,22 +90,7 @@ END;
 GO
 
 
--- =====================================================================
--- KULLANIM SENARYOLARI (sınav/savunma hatırlatması):
--- =====================================================================
--- 1) Sipariş teslimi:
---    UPDATE Orders SET OrderStatus = 'Teslim Edildi' WHERE OrderID = 10;
---    → trg_OrderDelivered_UpdateRevenue tetiklenir
---    → ilgili Restaurants.TotalRevenue otomatik artar.
---
--- 2) Askıda sipariş (başarılı):
---    INSERT INTO Orders (CustomerID, RestaurantID, TotalAmount, IsSuspendedOrder)
---    VALUES (5, 2, 75.00, 1);
---    → trg_SuspendedOrder_DeductPool tetiklenir
---    → DonationPool.TotalBalance 75 azalır.
---
--- 3) Askıda sipariş (bakiye yetersiz):
---    INSERT INTO Orders (CustomerID, RestaurantID, TotalAmount, IsSuspendedOrder)
---    VALUES (5, 2, 999999.00, 1);
---    → THROW 50002 → INSERT rollback olur, sipariş kaydedilmez.
--- =====================================================================
+-- Kullanım örnekleri:
+-- UPDATE Orders SET OrderStatus = N'Teslim Edildi' WHERE OrderID = 10; -- ciro artar
+-- INSERT INTO Orders (CustomerID, RestaurantID, TotalAmount, IsSuspendedOrder)
+--   VALUES (5, 2, 75.00, 1);  -- havuzdan 75 düşer (bakiye yetersizse reddedilir)

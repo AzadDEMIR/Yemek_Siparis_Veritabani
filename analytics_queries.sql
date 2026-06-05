@@ -1,29 +1,10 @@
-﻿-- =====================================================================
--- AŞAMA 9 — İLERİ DÜZEY SORGULAR (DQL & Analitik)
--- =====================================================================
--- Yönerge 3. madde gereği aşağıdaki sorgular, ne işe yaradıkları açıklama
--- satırlarıyla (comment) belirtilmiş şekilde yer alır:
---   (A) En az 3 tabloyu bağlayan detaylı sipariş fişi (INNER + LEFT JOIN)
---   (B) SUM/COUNT/AVG + GROUP BY + HAVING ile analitik sorgu
---   (C) IN / EXISTS / NOT EXISTS içeren mantıksal alt sorgu
--- Ek olarak Askıda Yemek modülünü gösteren 2 bonus sorgu eklenmiştir.
---
--- Önce mock_data.sql çalıştırılmış olmalı (veriler dolu olmalı).
+﻿-- İleri düzey sorgular (analitik). Önce mock_data.sql çalıştırılmış olmalı.
 
 USE YemekSiparis;
 GO
 
--- =====================================================================
--- (A) JOIN — Detaylı Sipariş Fişi (5 tablo: Orders, Users, Restaurants,
---     OrderDetails, Products + LEFT JOIN ile opsiyonel kurye)
--- =====================================================================
--- Amaç: Bir siparişin tüm kalemlerini; müşteri, restoran ve (varsa) kurye
--- bilgileriyle birlikte tek sorguda gösterir.
---   - INNER JOIN: müşteri, restoran, kalem ve ürün her siparişte ZORUNLU.
---   - LEFT  JOIN: CourierID NULL olabileceği için kurye OPSİYONEL bağlanır
---     (sipariş henüz kuryeye verilmediyse KuryeAdi NULL döner).
--- Belirli bir sipariş için: WHERE o.OrderID = 1 (örnek). Şartı kaldırırsanız
--- tüm fişler listelenir.
+-- (A) JOIN — Detaylı sipariş fişi (5 tablo).
+-- Kurye LEFT JOIN'dir (CourierID NULL olabilir). WHERE'i kaldırınca tüm fişler.
 SELECT
     o.OrderID,
     o.OrderDate,
@@ -47,15 +28,9 @@ ORDER BY o.OrderID, od.DetailID;
 GO
 
 
--- =====================================================================
--- (B) AGREGASYON + GROUP BY + HAVING
---     "Son 1 ayda (30 gün) 5'ten FAZLA sipariş alan restoranların
---      sipariş sayısı, toplam ve ORTALAMA sepet tutarı"
--- =====================================================================
--- SUM, COUNT, AVG fonksiyonları GROUP BY (restoran) ile birlikte kullanılır.
--- HAVING, gruplama SONRASI filtre uygular (COUNT(*) > 5). WHERE ise
--- gruplama ÖNCESİ satırları (son 30 gün + iptal hariç) süzer.
--- İptal edilen siparişler ciroyu yansıtmadığı için dışarıda bırakılır.
+-- (B) GROUP BY + HAVING — Son 30 günde 5'ten fazla sipariş alan restoranların
+-- sipariş sayısı, toplam ve ortalama sepet tutarı.
+-- WHERE: gruplama öncesi süzer (son 30 gün, iptal hariç). HAVING: gruplama sonrası.
 SELECT
     r.RestaurantID,
     r.Name                       AS RestoranAdi,
@@ -73,14 +48,8 @@ ORDER BY OrtalamaSepetTutari DESC;
 GO
 
 
--- =====================================================================
--- (C) ALT SORGU (Subquery) — NOT EXISTS + EXISTS
---     "Platformu aktif kullanan (en az 1 sipariş vermiş) ama HİÇ Askıda
---      Yemek bağışı yapmamış müşteriler"
--- =====================================================================
--- EXISTS    : müşterinin en az bir siparişi var mı? (aktif kullanım kanıtı)
--- NOT EXISTS: müşterinin Donations tablosunda hiç (aktif) bağışı YOK mu?
--- Korelasyonlu alt sorgular dış sorgudaki u.UserID'ye bağlanır.
+-- (C) Subquery — Aktif sipariş veren (EXISTS) ama hiç bağış yapmamış
+-- (NOT EXISTS) müşteriler. Korelasyonlu alt sorgular u.UserID'ye bağlanır.
 SELECT
     u.UserID,
     u.Name      AS MusteriAdi,
@@ -102,11 +71,7 @@ ORDER BY u.UserID;
 GO
 
 
--- =====================================================================
--- (BONUS-1) Askıda Yemek havuzundan SON 1 HAFTADA yararlanan kullanıcılar
--- =====================================================================
--- Final sınavı örnek sorusunun karşılığı. IsSuspendedOrder=1 olan, iptal
--- edilmemiş ve son 7 gün içindeki siparişleri veren müşterileri listeler.
+-- (Bonus) Havuzdan son 7 günde yararlanan kullanıcılar (askıda siparişler).
 SELECT DISTINCT
     u.UserID,
     u.Name          AS YararlananKullanici,
@@ -124,12 +89,7 @@ ORDER BY o.OrderDate DESC;
 GO
 
 
--- =====================================================================
--- (BONUS-2) Restoranların biriken cirosu (TotalRevenue) + IN alt sorgusu
--- =====================================================================
--- Trigger ile dolan TotalRevenue üzerinden, en az bir kez 'Teslim Edildi'
--- siparişi olan AKTİF restoranları cirosuna göre sıralar.
--- IN alt sorgusu: teslim edilmiş siparişi bulunan restoran kümesi.
+-- (Bonus) Teslim edilmiş siparişi olan aktif restoranlar, ciroya göre sıralı (IN).
 SELECT
     r.RestaurantID,
     r.Name          AS RestoranAdi,

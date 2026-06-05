@@ -1,21 +1,11 @@
-﻿-- =====================================================================
--- AŞAMA 3 — VIEWS (Görünümler)
--- =====================================================================
--- Yönerge gereği karmaşık sorguları basitleştiren en az 2 adet View
--- tanımlanmalıdır. Aşağıda zorunlu 2 view bulunmaktadır.
--- CREATE OR ALTER kullanıldı: Script tekrar çalıştırıldığında hata vermez,
--- mevcut view'i günceller. (SQL Server 2016 SP1+ destekler.)
+﻿-- VIEWS (Görünümler)
+-- CREATE OR ALTER: script tekrar çalıştırılınca hata vermez, view'i günceller.
 
 USE YemekSiparis;
 GO
 
--- ---------------------------------------------------------------------
--- 1) vw_AktifRestoranMenuleri
--- ---------------------------------------------------------------------
--- Amaç: Aktif (IsActive=1) restoranların, aktif olan menü ürünlerini
--- tek bir sorguda fiyat ve restoran puanıyla birlikte listeler.
--- Soft delete'e uygundur: pasife alınmış restoran/ürün burada görünmez.
--- INNER JOIN: Sadece menüsünde aktif ürünü bulunan restoranlar gelir.
+-- vw_AktifRestoranMenuleri: aktif restoranların aktif menü ürünleri.
+-- Pasife alınmış (IsActive=0) restoran/ürün listede görünmez.
 CREATE OR ALTER VIEW vw_AktifRestoranMenuleri AS
 SELECT
     r.RestaurantID,
@@ -33,18 +23,10 @@ WHERE r.IsActive = 1
 GO
 
 
--- ---------------------------------------------------------------------
--- 2) vw_AskidaYemekHavuzDurumu
--- ---------------------------------------------------------------------
--- Amaç: "Askıda Yemek" havuzunun anlık özet durumunu döndürür:
---   - ToplamBagis   : Aktif tüm bağışların toplam tutarı (Donations).
---   - ToplamKullanim: Askıda olarak verilen, iptal edilmemiş ve aktif
---                     siparişlerin toplam tutarı (Orders.IsSuspendedOrder=1).
---   - KalanBakiye   : ToplamBagis - ToplamKullanim (havuzdaki net tutar).
---
--- NOT: Tek satırlık özet üretir. Scalar alt sorgular kullanıldı çünkü
--- iki farklı tabloyu (Donations, Orders) tek satırda toplamamız gerekiyor;
--- normal JOIN burada kartezyen çarpıma yol açar.
+-- vw_AskidaYemekHavuzDurumu: havuzun anlık özeti (tek satır).
+--   ToplamBagis - ToplamKullanim = KalanBakiye.
+-- Scalar alt sorgular kullandık; iki ayrı tabloyu (Donations, Orders) tek
+-- satırda toplamak için JOIN kartezyen çarpıma yol açardı.
 CREATE OR ALTER VIEW vw_AskidaYemekHavuzDurumu AS
 SELECT
     (
@@ -77,26 +59,9 @@ SELECT
 GO
 
 
--- ---------------------------------------------------------------------
--- 3) vw_SiparisDetayFisi
--- ---------------------------------------------------------------------
--- Amaç: Bir siparişin "fişini" çıkartır. Sipariş başlığı (müşteri, restoran,
--- kurye, tarih, durum, toplam) ile birlikte siparişin her ürün kalemini
--- (adet, birim fiyat, satır toplamı) tek bir sonuç kümesinde döndürür.
---
--- Kullanım örnekleri:
---   - Müşterinin sipariş geçmişi ekranı
---   - "Detaylı sipariş fişi" raporu
---   - Aşama 6'daki çok tablolu JOIN sorgusu (yönerge gereği)
---
--- JOIN seçimleri:
---   - Users (müşteri)     : INNER JOIN — her siparişin müşterisi zorunlu (NOT NULL FK)
---   - Restaurants         : INNER JOIN — her siparişin restoranı zorunlu (NOT NULL FK)
---   - Users (kurye)       : LEFT  JOIN — CourierID NULL olabilir (sipariş yola çıkana kadar)
---   - OrderDetails        : INNER JOIN — kalemi olmayan sipariş anlamsız (yine de soft-delete uyumu için IsActive=1)
---   - Products            : INNER JOIN — her detay bir ürüne bağlı (NOT NULL FK)
---
--- Pasife alınmış (IsActive=0) sipariş veya kalemler fişe dahil edilmez.
+-- vw_SiparisDetayFisi: sipariş fişi. Başlık (müşteri, restoran, kurye, durum)
+-- ile her ürün kalemini (adet, birim fiyat, satır toplamı) birleştirir.
+-- Kurye LEFT JOIN'dir (CourierID NULL olabilir); diğerleri zorunlu (INNER JOIN).
 CREATE OR ALTER VIEW vw_SiparisDetayFisi AS
 SELECT
     -- Sipariş başlığı
@@ -138,20 +103,7 @@ WHERE o.IsActive  = 1
 GO
 
 
--- =====================================================================
--- KULLANIM ÖRNEKLERİ (sınavda sorulursa hatırlatma amaçlı):
--- =====================================================================
--- SELECT * FROM vw_AktifRestoranMenuleri
--- WHERE RestoranPuani >= 4.0
--- ORDER BY RestoranAdi, UrunFiyati;
---
+-- Kullanım örnekleri:
+-- SELECT * FROM vw_AktifRestoranMenuleri WHERE RestoranPuani >= 4.0;
 -- SELECT * FROM vw_AskidaYemekHavuzDurumu;
---
--- -- Belirli bir siparişin fişi:
 -- SELECT * FROM vw_SiparisDetayFisi WHERE OrderID = 1;
---
--- -- Bir müşterinin tüm sipariş geçmişi (en yeni önce):
--- SELECT * FROM vw_SiparisDetayFisi
--- WHERE MusteriID = 5
--- ORDER BY OrderDate DESC, OrderID, DetailID;
--- =====================================================================

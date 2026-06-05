@@ -1,65 +1,53 @@
 ﻿-- Çevrimiçi Yemek Sipariş Platformu - Veritabanı Oluşturma Scripti (DDL)
 
--- =====================================================================
--- VERİTABANI OLUŞTURMA
--- =====================================================================
--- Eğer YemekSiparis veritabanı yoksa oluştur. (IF NOT EXISTS — script tekrar çalıştırılırsa hata vermez.)
+-- Veritabanı yoksa oluştur (tekrar çalıştırmada hata vermez).
 IF DB_ID(N'YemekSiparis') IS NULL
 BEGIN
     CREATE DATABASE YemekSiparis;
 END
 GO
 
--- Tabloları oluştururken hangi veritabanı içinde çalıştığımızı belirt.
 USE YemekSiparis;
 GO
 
--- 1. Users Tablosu
--- Müşteri, Restoran Kurum/Yetkilisi ve Kurye gibi tüm kullanıcı tiplerini ortak bir tabloda tutar.
+-- Users: müşteri, restoran yetkilisi ve kuryeyi tek tabloda UserType ile tutar.
 CREATE TABLE Users (
-    UserID INT PRIMARY KEY IDENTITY(1,1), -- MS SQL Server sözdizimi kullanılmıştır. (MySQL için AUTO_INCREMENT, PgSQL için SERIAL kullanabilirsiniz.)
+    UserID INT PRIMARY KEY IDENTITY(1,1),
     Name NVARCHAR(100) NOT NULL,
     Email NVARCHAR(150) UNIQUE NOT NULL,
     Phone NVARCHAR(20),
     UserType NVARCHAR(50) NOT NULL CHECK (UserType IN (N'Müşteri', N'Restoran', N'Kurye')),
-    IsVerified BIT NOT NULL DEFAULT 0, -- Hesap doğrulama durumu. 0: Doğrulanmamış, 1: Doğrulanmış (MySQL/PgSQL için BOOLEAN)
-    IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete. 1: Aktif, 0: Silinmiş
+    IsVerified BIT NOT NULL DEFAULT 0, -- 1: doğrulanmış ihtiyaç sahibi
+    IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete (1: aktif, 0: pasif)
 );
 
--- 2. Restaurants Tablosu
--- Sisteme kayıtlı olan restoranların temel bilgilerini ve puanlarını tutar.
+-- Restaurants: restoran bilgileri ve puanı.
 CREATE TABLE Restaurants (
     RestaurantID INT PRIMARY KEY IDENTITY(1,1),
     Name NVARCHAR(100) NOT NULL,
     Address NVARCHAR(255) NOT NULL,
-    Rating DECIMAL(3,2) CHECK (Rating >= 1.00 AND Rating <= 5.00), -- 1 ile 5 arasında kısıtlama
-    TotalRevenue DECIMAL(18,2) NOT NULL DEFAULT 0.00, -- Teslim edilen siparişlerden biriken ciro (Trigger ile güncellenir)
+    Rating DECIMAL(3,2) CHECK (Rating >= 1.00 AND Rating <= 5.00), -- 1-5 arası
+    TotalRevenue DECIMAL(18,2) NOT NULL DEFAULT 0.00, -- biriken ciro (trigger ile)
     IsActive BIT NOT NULL DEFAULT 1    -- Soft Delete
 );
 
--- 3. Products Tablosu
--- Restoranların oluşturduğu menüdeki yemek/ürün bilgilerini tutar.
+-- Products: restoranların menü ürünleri.
 CREATE TABLE Products (
     ProductID INT PRIMARY KEY IDENTITY(1,1),
     RestaurantID INT NOT NULL,
     ProductName NVARCHAR(100) NOT NULL,
-    Price DECIMAL(10,2) NOT NULL CHECK (Price > 0), -- Fiyatın 0'dan büyük olma zorunluluğu
+    Price DECIMAL(10,2) NOT NULL CHECK (Price > 0),
     IsActive BIT NOT NULL DEFAULT 1,                -- Soft Delete
-    
-    -- Foreign Key Constraint (Referans Bütünlüğü)
-    -- Hangi ürünün hangi restorana ait olduğunu tutar. Soft delete mantığında verileri DB'den silmeyeceğimiz için CASCADE gibi kuralları eklemiyoruz.
     CONSTRAINT FK_Products_Restaurants FOREIGN KEY (RestaurantID) REFERENCES Restaurants(RestaurantID)
 );
 
--- 4. DonationPool Tablosu
--- Örneğin "Askıda Yemek" projesinde havuzdaki toplam para veya bağış bakiyesini tutar.
+-- DonationPool: "Askıda Yemek" havuzunun anlık bakiyesi (tek satır, PoolID=1).
 CREATE TABLE DonationPool (
     PoolID INT PRIMARY KEY IDENTITY(1,1),
     TotalBalance DECIMAL(18,2) NOT NULL DEFAULT 0.00
 );
 
--- 5. Orders Tablosu
--- Müşterilerin restoranlardan verdiği siparişlerin üst seviye bilgilerini tutar.
+-- Orders: sipariş başlıkları.
 CREATE TABLE Orders (
     OrderID       INT PRIMARY KEY IDENTITY(1,1),
     CustomerID    INT NOT NULL,                               -- Hangi müşteriye ait
@@ -78,9 +66,8 @@ CREATE TABLE Orders (
     CONSTRAINT FK_Orders_Couriers     FOREIGN KEY (CourierID)    REFERENCES Users(UserID)
 );
 
--- 6. OrderDetails Tablosu
--- Her siparişin hangi ürünleri, kaç adet ve hangi birim fiyatıyla içerdiğini tutar.
--- Birim fiyatı ayrı saklamak, ürün fiyatı sonradan değişse bile sipariş geçmişinin bozulmamasını sağlar.
+-- OrderDetails: sipariş kalemleri. UnitPrice'ı ayrı saklarız ki ürün fiyatı
+-- sonradan değişse bile geçmiş siparişin tutarı bozulmasın.
 CREATE TABLE OrderDetails (
     DetailID    INT PRIMARY KEY IDENTITY(1,1),
     OrderID     INT NOT NULL,
@@ -94,37 +81,20 @@ CREATE TABLE OrderDetails (
     CONSTRAINT FK_OrderDetails_Products FOREIGN KEY (ProductID) REFERENCES Products(ProductID)
 );
 
--- 7. Donations Tablosu
--- "Askıda Yemek" bağışlarının kaydını tutar. DonorID NULL olabilir (anonim bağış desteği).
+-- Donations: bağış kayıtları. DonorID NULL olabilir (anonim bağış).
 CREATE TABLE Donations (
     DonationID   INT PRIMARY KEY IDENTITY(1,1),
-    DonorID      INT NULL,                                    -- NULL: Anonim bağış
-    Amount       DECIMAL(10,2) NOT NULL CHECK (Amount > 0),   -- Bağış tutarı 0'dan büyük olmalı
+    DonorID      INT NULL,                                    -- NULL: anonim
+    Amount       DECIMAL(10,2) NOT NULL CHECK (Amount > 0),
     DonationDate DATETIME NOT NULL DEFAULT GETDATE(),
     IsActive     BIT NOT NULL DEFAULT 1,                      -- Soft Delete
-
-    -- Foreign Key Constraint (NULL değer FK kuralını ihlal etmez, anonim bağışa izin verir)
     CONSTRAINT FK_Donations_Donors FOREIGN KEY (DonorID) REFERENCES Users(UserID)
 );
 GO
 
--- =====================================================================
--- INDEX'LER (Primary Key dışında performans için tanımlanan indeksler)
--- =====================================================================
--- Yönerge gereği en az 2 anlamlı, PK harici index olmalı. Aşağıda 4 adet tanımlandı.
-
--- 1) Sipariş tarihine göre raporlama (son X gün, ay sonu vb.) çok sık yapılır.
---    Tarih bazlı WHERE/ORDER BY sorgularını hızlandırır.
-CREATE INDEX IX_Orders_OrderDate    ON Orders(OrderDate);
-
--- 2) Bir müşterinin sipariş geçmişi (WHERE CustomerID = ?) çok sık çekilir.
---    FK kolonu olduğu için JOIN'lerde de hız kazandırır.
-CREATE INDEX IX_Orders_CustomerID   ON Orders(CustomerID);
-
--- 3) Restoranın menüsünü çekerken Products tablosunda RestaurantID ile filtre yapılır.
---    Aktif menüler view'unda da kullanıldığı için performansı doğrudan etkiler.
-CREATE INDEX IX_Products_Restaurant ON Products(RestaurantID);
-
--- 4) Bağışların tarih bazlı raporlanması (aylık/haftalık) için.
-CREATE INDEX IX_Donations_Date      ON Donations(DonationDate);
+-- Index'ler (PK dışı, sık filtrelenen kolonlar için).
+CREATE INDEX IX_Orders_OrderDate    ON Orders(OrderDate);     -- tarih bazlı raporlama
+CREATE INDEX IX_Orders_CustomerID   ON Orders(CustomerID);    -- müşteri sipariş geçmişi
+CREATE INDEX IX_Products_Restaurant ON Products(RestaurantID);-- restoran menüsü
+CREATE INDEX IX_Donations_Date      ON Donations(DonationDate);-- bağış raporlama
 GO
