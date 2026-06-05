@@ -184,3 +184,46 @@ INSERT INTO Products (RestaurantID, ProductName, Price, IsActive) VALUES
 (6, 'Karışık Izgara',      160.00, 0), -- 51 (restoran kapalı -> ürün de pasif)
 (6, 'Ev Yemeği Tabağı',    120.00, 0); -- 52
 GO
+
+-- ---------------------------------------------------------------------
+-- BÖLÜM 3 — Donations + DonationPool ("Askıda Yemek" havuzu)
+-- ---------------------------------------------------------------------
+-- Askıda Yemek modülünün PARA tarafı burada başlar:
+--   - Donations  : Her bir bağışın TARİHÇE kaydı (kim, ne kadar, ne zaman).
+--   - DonationPool: Havuzdaki ANLIK bakiye (tek satır, PoolID=1).
+--
+-- DonorID NULL  -> anonim bağış (hayırsever kimliğini gizleyebilir).
+-- DonorID dolu  -> bağışı yapan müşterinin UserID'si.
+-- Amount CHECK kısıtı gereği her zaman > 0'dır.
+-- Bağışçılar 'Müşteri' tipindedir; pasif (UserID 22) kullanıcı seçilmedi.
+
+INSERT INTO Donations (DonorID, Amount, DonationDate, IsActive) VALUES
+(1,    500.00, DATEADD(DAY, -40, GETDATE()), 1),
+(2,    300.00, DATEADD(DAY, -38, GETDATE()), 1),
+(NULL, 1000.00, DATEADD(DAY, -35, GETDATE()), 1), -- anonim
+(3,    250.00, DATEADD(DAY, -30, GETDATE()), 1),
+(5,    150.00, DATEADD(DAY, -28, GETDATE()), 1),
+(NULL, 750.00, DATEADD(DAY, -25, GETDATE()), 1),  -- anonim
+(8,    200.00, DATEADD(DAY, -22, GETDATE()), 1),
+(10,   100.00, DATEADD(DAY, -20, GETDATE()), 1),
+(4,    400.00, DATEADD(DAY, -16, GETDATE()), 1),
+(NULL, 600.00, DATEADD(DAY, -12, GETDATE()), 1),  -- anonim
+(6,    350.00, DATEADD(DAY, -9,  GETDATE()), 1),
+(11,   120.00, DATEADD(DAY, -6,  GETDATE()), 1),
+(NULL, 800.00, DATEADD(DAY, -4,  GETDATE()), 1),  -- anonim
+(15,   280.00, DATEADD(DAY, -2,  GETDATE()), 1),
+(7,    999.00, DATEADD(DAY, -1,  GETDATE()), 0);  -- SOFT DELETE (iptal edilmiş bağış, havuza sayılmaz)
+GO
+-- Aktif bağış toplamı = 5800.00 (IsActive=0 olan 999.00 hariç).
+
+-- DonationPool başlangıç bakiyesi:
+-- Havuzu, AKTİF bağışların toplamına eşitleyerek tek satır (PoolID=1) açıyoruz.
+-- SUM ile dinamik hesapladık; böylece yukarıdaki bağışları değiştirsek bile
+-- havuz bakiyesi elle düzeltmeye gerek kalmadan tutarlı kalır.
+-- Bundan sonra "askıda sipariş" eklendikçe trg_SuspendedOrder_DeductPool
+-- tetikleyicisi bu bakiyeyi OTOMATİK düşürecektir.
+INSERT INTO DonationPool (TotalBalance)
+SELECT ISNULL(SUM(Amount), 0)
+FROM Donations
+WHERE IsActive = 1;
+GO
