@@ -227,3 +227,371 @@ SELECT ISNULL(SUM(Amount), 0)
 FROM Donations
 WHERE IsActive = 1;
 GO
+
+-- ---------------------------------------------------------------------
+-- BÖLÜM 4 — Orders (100) + OrderDetails  (trigger'ları çalıştıran akış)
+-- ---------------------------------------------------------------------
+-- Yönerge: en az 100 sipariş hareketi. Tam 100 sipariş eklenir.
+--
+-- TASARIM / TRIGGER UYUMU (savunma için kritik):
+--  1) Her siparişin TotalAmount'u, o siparişin OrderDetails kalemlerinin
+--     (Quantity * UnitPrice) toplamına EŞİTtir (üreteçle garanti edildi).
+--  2) Bir siparişin ürünleri HER ZAMAN siparişin restoranına aittir
+--     (ProductID blokları Bölüm 2'deki restorana göre seçilir).
+--  3) ASKIDA SİPARİŞ (IsSuspendedOrder=1): müşterisi 'doğrulanmış ihtiyaç
+--     sahibi' (UserID 1-7) olan 8 sipariş. INSERT anında
+--     trg_SuspendedOrder_DeductPool tetiklenir ve DonationPool bakiyesi
+--     sipariş tutarı kadar OTOMATİK düşer. (Toplam askıda tutar < 5800.)
+--  4) TESLİM AKIŞI: Nihai durumu 'Teslim Edildi' olan siparişler önce
+--     'Yolda' olarak eklenir; en sonda tek bir UPDATE ile 'Teslim Edildi'
+--     yapılır. Böylece trg_OrderDelivered_UpdateRevenue tetiklenir ve
+--     Restaurants.TotalRevenue ciroyu OTOMATİK biriktirir. (Doğrudan
+--     'Teslim Edildi' eklemek AFTER UPDATE trigger'ını tetiklemezdi.)
+--
+-- Durum dağılımı: 60 Teslim Edildi, 12 Yolda, 10 Hazırlanıyor,
+--                 10 Alındı, 8 İptal.  CourierID: gönderilmemişlerde NULL.
+
+INSERT INTO Orders (CustomerID, RestaurantID, CourierID, OrderDate, TotalAmount, OrderStatus, IsSuspendedOrder) VALUES
+(8, 2, 26, DATEADD(DAY, -4, GETDATE()), 1050.00, N'Yolda', 0),  -- 1
+(16, 5, 24, DATEADD(DAY, -25, GETDATE()), 130.00, N'Yolda', 0),  -- 2
+(20, 4, NULL, DATEADD(DAY, -14, GETDATE()), 130.00, N'Alındı', 0),  -- 3
+(9, 5, 25, DATEADD(DAY, -14, GETDATE()), 730.00, N'Yolda', 0),  -- 4
+(9, 1, 24, DATEADD(DAY, -24, GETDATE()), 1160.00, N'Yolda', 0),  -- 5
+(18, 2, 25, DATEADD(DAY, -7, GETDATE()), 695.00, N'Yolda', 0),  -- 6
+(3, 5, 24, DATEADD(DAY, -15, GETDATE()), 90.00, N'Yolda', 0),  -- 7
+(6, 5, 24, DATEADD(DAY, -12, GETDATE()), 505.00, N'Yolda', 0),  -- 8
+(15, 3, 23, DATEADD(DAY, -7, GETDATE()), 1030.00, N'Yolda', 0),  -- 9
+(8, 5, NULL, DATEADD(DAY, -7, GETDATE()), 330.00, N'Hazırlanıyor', 0),  -- 10
+(2, 1, NULL, DATEADD(DAY, -17, GETDATE()), 1010.00, N'Hazırlanıyor', 0),  -- 11
+(19, 2, 23, DATEADD(DAY, -13, GETDATE()), 635.00, N'Yolda', 0),  -- 12
+(14, 3, 23, DATEADD(DAY, -23, GETDATE()), 1410.00, N'Yolda', 0),  -- 13
+(4, 3, 26, DATEADD(DAY, -5, GETDATE()), 270.00, N'Yolda', 0),  -- 14
+(15, 3, NULL, DATEADD(DAY, -38, GETDATE()), 520.00, N'Hazırlanıyor', 0),  -- 15
+(2, 1, 26, DATEADD(DAY, -27, GETDATE()), 290.00, N'Yolda', 0),  -- 16
+(2, 4, 26, DATEADD(DAY, -25, GETDATE()), 65.00, N'Yolda', 0),  -- 17
+(10, 4, NULL, DATEADD(DAY, -1, GETDATE()), 160.00, N'İptal', 0),  -- 18
+(18, 5, NULL, DATEADD(DAY, -15, GETDATE()), 140.00, N'Hazırlanıyor', 0),  -- 19
+(17, 5, 23, DATEADD(DAY, -31, GETDATE()), 390.00, N'Yolda', 0);  -- 20
+GO
+
+INSERT INTO Orders (CustomerID, RestaurantID, CourierID, OrderDate, TotalAmount, OrderStatus, IsSuspendedOrder) VALUES
+(3, 5, 23, DATEADD(DAY, -13, GETDATE()), 675.00, N'Yolda', 0),  -- 21
+(19, 5, 24, DATEADD(DAY, -4, GETDATE()), 920.00, N'Yolda', 0),  -- 22
+(15, 3, 23, DATEADD(DAY, -6, GETDATE()), 1240.00, N'Yolda', 0),  -- 23
+(9, 5, NULL, DATEADD(DAY, -35, GETDATE()), 140.00, N'İptal', 0),  -- 24
+(6, 3, NULL, DATEADD(DAY, -21, GETDATE()), 1245.00, N'Hazırlanıyor', 0),  -- 25
+(10, 5, 24, DATEADD(DAY, -19, GETDATE()), 535.00, N'Yolda', 0),  -- 26
+(11, 2, NULL, DATEADD(DAY, -28, GETDATE()), 585.00, N'Alındı', 0),  -- 27
+(1, 1, 26, DATEADD(DAY, -30, GETDATE()), 45.00, N'Yolda', 1),  -- 28 [ASKIDA]
+(11, 1, NULL, DATEADD(DAY, -17, GETDATE()), 210.00, N'Alındı', 0),  -- 29
+(18, 4, 24, DATEADD(DAY, -26, GETDATE()), 155.00, N'Yolda', 0),  -- 30
+(19, 3, 23, DATEADD(DAY, -33, GETDATE()), 490.00, N'Yolda', 0),  -- 31
+(4, 2, 24, DATEADD(DAY, -33, GETDATE()), 600.00, N'Yolda', 0),  -- 32
+(6, 2, 26, DATEADD(DAY, -33, GETDATE()), 900.00, N'Yolda', 0),  -- 33
+(6, 3, 26, DATEADD(DAY, -26, GETDATE()), 840.00, N'Yolda', 0),  -- 34
+(8, 2, NULL, DATEADD(DAY, -27, GETDATE()), 350.00, N'Hazırlanıyor', 0),  -- 35
+(9, 1, 25, DATEADD(DAY, -31, GETDATE()), 420.00, N'Yolda', 0),  -- 36
+(6, 3, NULL, DATEADD(DAY, -10, GETDATE()), 1960.00, N'İptal', 0),  -- 37
+(20, 4, 26, DATEADD(DAY, -29, GETDATE()), 780.00, N'Yolda', 0),  -- 38
+(7, 5, NULL, DATEADD(DAY, -21, GETDATE()), 625.00, N'Alındı', 0),  -- 39
+(10, 1, 24, DATEADD(DAY, -21, GETDATE()), 1080.00, N'Yolda', 0);  -- 40
+GO
+
+INSERT INTO Orders (CustomerID, RestaurantID, CourierID, OrderDate, TotalAmount, OrderStatus, IsSuspendedOrder) VALUES
+(6, 4, 25, DATEADD(DAY, -26, GETDATE()), 195.00, N'Yolda', 1),  -- 41 [ASKIDA]
+(10, 1, 25, DATEADD(DAY, -14, GETDATE()), 1020.00, N'Yolda', 0),  -- 42
+(17, 2, 25, DATEADD(DAY, -24, GETDATE()), 990.00, N'Yolda', 0),  -- 43
+(10, 2, 23, DATEADD(DAY, -15, GETDATE()), 175.00, N'Yolda', 0),  -- 44
+(3, 5, 26, DATEADD(DAY, -7, GETDATE()), 615.00, N'Yolda', 0),  -- 45
+(21, 2, 26, DATEADD(DAY, -7, GETDATE()), 675.00, N'Yolda', 0),  -- 46
+(4, 1, 26, DATEADD(DAY, -17, GETDATE()), 175.00, N'Yolda', 1),  -- 47 [ASKIDA]
+(11, 5, 26, DATEADD(DAY, -37, GETDATE()), 400.00, N'Yolda', 0),  -- 48
+(9, 4, 26, DATEADD(DAY, -8, GETDATE()), 435.00, N'Yolda', 0),  -- 49
+(3, 4, 23, DATEADD(DAY, -7, GETDATE()), 650.00, N'Yolda', 0),  -- 50
+(5, 4, NULL, DATEADD(DAY, -1, GETDATE()), 775.00, N'İptal', 0),  -- 51
+(14, 2, 25, DATEADD(DAY, -12, GETDATE()), 485.00, N'Yolda', 0),  -- 52
+(18, 4, 26, DATEADD(DAY, -10, GETDATE()), 515.00, N'Yolda', 0),  -- 53
+(6, 4, 23, DATEADD(DAY, -13, GETDATE()), 345.00, N'Yolda', 0),  -- 54
+(7, 2, 24, DATEADD(DAY, -12, GETDATE()), 35.00, N'Yolda', 1),  -- 55 [ASKIDA]
+(7, 3, 26, DATEADD(DAY, -2, GETDATE()), 220.00, N'Yolda', 0),  -- 56
+(1, 4, 23, DATEADD(DAY, -7, GETDATE()), 555.00, N'Yolda', 0),  -- 57
+(1, 2, 24, DATEADD(DAY, -8, GETDATE()), 1135.00, N'Yolda', 0),  -- 58
+(6, 3, 23, DATEADD(DAY, -39, GETDATE()), 1090.00, N'Yolda', 0),  -- 59
+(13, 4, 23, DATEADD(DAY, -18, GETDATE()), 660.00, N'Yolda', 0);  -- 60
+GO
+
+INSERT INTO Orders (CustomerID, RestaurantID, CourierID, OrderDate, TotalAmount, OrderStatus, IsSuspendedOrder) VALUES
+(12, 1, 23, DATEADD(DAY, -37, GETDATE()), 885.00, N'Yolda', 0),  -- 61
+(14, 1, 25, DATEADD(DAY, -29, GETDATE()), 240.00, N'Yolda', 0),  -- 62
+(16, 5, 23, DATEADD(DAY, -14, GETDATE()), 390.00, N'Yolda', 0),  -- 63
+(15, 2, 26, DATEADD(DAY, -25, GETDATE()), 860.00, N'Yolda', 0),  -- 64
+(11, 3, NULL, DATEADD(DAY, -6, GETDATE()), 440.00, N'Alındı', 0),  -- 65
+(2, 1, 26, DATEADD(DAY, -24, GETDATE()), 45.00, N'Yolda', 1),  -- 66 [ASKIDA]
+(16, 2, NULL, DATEADD(DAY, -22, GETDATE()), 425.00, N'Hazırlanıyor', 0),  -- 67
+(10, 2, 25, DATEADD(DAY, -14, GETDATE()), 1065.00, N'Yolda', 0),  -- 68
+(10, 3, NULL, DATEADD(DAY, -23, GETDATE()), 1070.00, N'Alındı', 0),  -- 69
+(6, 5, 26, DATEADD(DAY, -18, GETDATE()), 210.00, N'Yolda', 0),  -- 70
+(20, 5, 25, DATEADD(DAY, -0, GETDATE()), 290.00, N'Yolda', 0),  -- 71
+(5, 5, NULL, DATEADD(DAY, -4, GETDATE()), 490.00, N'İptal', 0),  -- 72
+(4, 4, 26, DATEADD(DAY, -10, GETDATE()), 60.00, N'Yolda', 0),  -- 73
+(2, 2, NULL, DATEADD(DAY, -18, GETDATE()), 440.00, N'İptal', 0),  -- 74
+(5, 1, 24, DATEADD(DAY, -24, GETDATE()), 210.00, N'Yolda', 0),  -- 75
+(20, 4, NULL, DATEADD(DAY, -36, GETDATE()), 460.00, N'Alındı', 0),  -- 76
+(19, 3, 23, DATEADD(DAY, -5, GETDATE()), 1520.00, N'Yolda', 0),  -- 77
+(3, 5, 26, DATEADD(DAY, -15, GETDATE()), 260.00, N'Yolda', 0),  -- 78
+(2, 3, NULL, DATEADD(DAY, -27, GETDATE()), 960.00, N'Alındı', 0),  -- 79
+(3, 4, NULL, DATEADD(DAY, -4, GETDATE()), 505.00, N'Hazırlanıyor', 0);  -- 80
+GO
+
+INSERT INTO Orders (CustomerID, RestaurantID, CourierID, OrderDate, TotalAmount, OrderStatus, IsSuspendedOrder) VALUES
+(7, 3, 23, DATEADD(DAY, -25, GETDATE()), 80.00, N'Yolda', 1),  -- 81 [ASKIDA]
+(20, 3, 25, DATEADD(DAY, -8, GETDATE()), 1370.00, N'Yolda', 0),  -- 82
+(18, 5, 26, DATEADD(DAY, -19, GETDATE()), 380.00, N'Yolda', 0),  -- 83
+(1, 3, NULL, DATEADD(DAY, -39, GETDATE()), 810.00, N'Alındı', 0),  -- 84
+(1, 5, NULL, DATEADD(DAY, -8, GETDATE()), 825.00, N'İptal', 0),  -- 85
+(19, 2, 26, DATEADD(DAY, -21, GETDATE()), 500.00, N'Yolda', 0),  -- 86
+(6, 1, 26, DATEADD(DAY, -38, GETDATE()), 375.00, N'Yolda', 0),  -- 87
+(15, 1, NULL, DATEADD(DAY, -24, GETDATE()), 110.00, N'Hazırlanıyor', 0),  -- 88
+(7, 4, 23, DATEADD(DAY, -17, GETDATE()), 75.00, N'Yolda', 1),  -- 89 [ASKIDA]
+(14, 4, 25, DATEADD(DAY, -15, GETDATE()), 405.00, N'Yolda', 0),  -- 90
+(2, 4, NULL, DATEADD(DAY, -9, GETDATE()), 435.00, N'Alındı', 0),  -- 91
+(16, 4, 24, DATEADD(DAY, -9, GETDATE()), 420.00, N'Yolda', 0),  -- 92
+(1, 5, 24, DATEADD(DAY, -22, GETDATE()), 425.00, N'Yolda', 0),  -- 93
+(17, 3, 24, DATEADD(DAY, -29, GETDATE()), 1180.00, N'Yolda', 0),  -- 94
+(17, 5, 25, DATEADD(DAY, -34, GETDATE()), 710.00, N'Yolda', 0),  -- 95
+(19, 3, 25, DATEADD(DAY, -17, GETDATE()), 1270.00, N'Yolda', 0),  -- 96
+(15, 4, NULL, DATEADD(DAY, -24, GETDATE()), 465.00, N'İptal', 0),  -- 97
+(2, 4, 24, DATEADD(DAY, -1, GETDATE()), 365.00, N'Yolda', 0),  -- 98
+(5, 2, 23, DATEADD(DAY, -37, GETDATE()), 165.00, N'Yolda', 1),  -- 99 [ASKIDA]
+(17, 1, NULL, DATEADD(DAY, -31, GETDATE()), 810.00, N'Hazırlanıyor', 0);  -- 100
+GO
+
+-- OrderDetails — her siparişin kalemleri (UnitPrice = sipariş anındaki birim fiyat)
+INSERT INTO OrderDetails (OrderID, ProductID, Quantity, UnitPrice) VALUES
+(1, 19, 3, 35.00),  -- sipariş 1
+(1, 15, 2, 195.00),  -- sipariş 1
+(1, 16, 3, 185.00),  -- sipariş 1
+(2, 41, 1, 130.00),  -- sipariş 2
+(3, 37, 2, 65.00),  -- sipariş 3
+(4, 41, 3, 130.00),  -- sipariş 4
+(4, 42, 2, 110.00),  -- sipariş 4
+(4, 45, 1, 120.00),  -- sipariş 4
+(5, 3, 3, 150.00),  -- sipariş 5
+(5, 2, 2, 175.00),  -- sipariş 5
+(5, 7, 3, 120.00),  -- sipariş 5
+(6, 11, 1, 160.00),  -- sipariş 6
+(6, 16, 1, 185.00),  -- sipariş 6
+(6, 14, 2, 175.00),  -- sipariş 6
+(7, 48, 1, 90.00),  -- sipariş 7
+(8, 49, 1, 100.00),  -- sipariş 8
+(8, 47, 3, 135.00),  -- sipariş 8
+(9, 28, 1, 230.00),  -- sipariş 9
+(9, 22, 1, 260.00),  -- sipariş 9
+(9, 24, 2, 270.00),  -- sipariş 9
+(10, 42, 3, 110.00),  -- sipariş 10
+(11, 2, 2, 175.00),  -- sipariş 11
+(11, 4, 3, 220.00),  -- sipariş 11
+(12, 18, 2, 60.00),  -- sipariş 12
+(12, 14, 2, 175.00),  -- sipariş 12
+(12, 17, 1, 165.00),  -- sipariş 12
+(13, 28, 3, 230.00),  -- sipariş 13
+(13, 21, 3, 240.00),  -- sipariş 13
+(14, 24, 1, 270.00),  -- sipariş 14
+(15, 22, 2, 260.00),  -- sipariş 15
+(16, 9, 1, 20.00),  -- sipariş 16
+(16, 1, 1, 180.00),  -- sipariş 16
+(16, 8, 2, 45.00),  -- sipariş 16
+(17, 37, 1, 65.00),  -- sipariş 17
+(18, 39, 1, 75.00),  -- sipariş 18
+(18, 38, 1, 85.00),  -- sipariş 18
+(19, 46, 1, 140.00),  -- sipariş 19
+(20, 41, 3, 130.00);  -- sipariş 20
+GO
+
+INSERT INTO OrderDetails (OrderID, ProductID, Quantity, UnitPrice) VALUES
+(21, 44, 3, 70.00),  -- sipariş 21
+(21, 47, 1, 135.00),  -- sipariş 21
+(21, 42, 3, 110.00),  -- sipariş 21
+(22, 46, 3, 140.00),  -- sipariş 22
+(22, 45, 3, 120.00),  -- sipariş 22
+(22, 44, 2, 70.00),  -- sipariş 22
+(23, 22, 2, 260.00),  -- sipariş 23
+(23, 21, 3, 240.00),  -- sipariş 23
+(24, 46, 1, 140.00),  -- sipariş 24
+(25, 29, 3, 95.00),  -- sipariş 25
+(25, 25, 3, 320.00),  -- sipariş 25
+(26, 42, 1, 110.00),  -- sipariş 26
+(26, 43, 1, 65.00),  -- sipariş 26
+(26, 45, 3, 120.00),  -- sipariş 26
+(27, 15, 3, 195.00),  -- sipariş 27
+(28, 8, 1, 45.00),  -- sipariş 28
+(29, 5, 1, 210.00),  -- sipariş 29
+(30, 32, 1, 155.00),  -- sipariş 30
+(31, 23, 1, 250.00),  -- sipariş 31
+(31, 27, 2, 80.00),  -- sipariş 31
+(31, 30, 2, 40.00),  -- sipariş 31
+(32, 19, 3, 35.00),  -- sipariş 32
+(32, 17, 3, 165.00),  -- sipariş 32
+(33, 11, 3, 160.00),  -- sipariş 33
+(33, 13, 2, 210.00),  -- sipariş 33
+(34, 22, 2, 260.00),  -- sipariş 34
+(34, 27, 1, 80.00),  -- sipariş 34
+(34, 21, 1, 240.00),  -- sipariş 34
+(35, 14, 2, 175.00),  -- sipariş 35
+(36, 9, 3, 20.00),  -- sipariş 36
+(36, 7, 3, 120.00),  -- sipariş 36
+(37, 25, 3, 320.00),  -- sipariş 37
+(37, 21, 2, 240.00),  -- sipariş 37
+(37, 22, 2, 260.00),  -- sipariş 37
+(38, 32, 2, 155.00),  -- sipariş 38
+(38, 37, 1, 65.00),  -- sipariş 38
+(38, 34, 3, 135.00),  -- sipariş 38
+(39, 47, 3, 135.00),  -- sipariş 39
+(39, 42, 2, 110.00),  -- sipariş 39
+(40, 5, 2, 210.00),  -- sipariş 40
+(40, 7, 3, 120.00),  -- sipariş 40
+(40, 3, 2, 150.00);  -- sipariş 40
+GO
+
+INSERT INTO OrderDetails (OrderID, ProductID, Quantity, UnitPrice) VALUES
+(41, 33, 1, 195.00),  -- sipariş 41
+(42, 4, 3, 220.00),  -- sipariş 42
+(42, 7, 3, 120.00),  -- sipariş 42
+(43, 13, 2, 210.00),  -- sipariş 43
+(43, 12, 3, 190.00),  -- sipariş 43
+(44, 14, 1, 175.00),  -- sipariş 44
+(45, 47, 3, 135.00),  -- sipariş 45
+(45, 44, 3, 70.00),  -- sipariş 45
+(46, 11, 2, 160.00),  -- sipariş 46
+(46, 12, 1, 190.00),  -- sipariş 46
+(46, 17, 1, 165.00),  -- sipariş 46
+(47, 2, 1, 175.00),  -- sipariş 47
+(48, 50, 2, 50.00),  -- sipariş 48
+(48, 49, 3, 100.00),  -- sipariş 48
+(49, 35, 3, 145.00),  -- sipariş 49
+(50, 35, 2, 145.00),  -- sipariş 50
+(50, 34, 2, 135.00),  -- sipariş 50
+(50, 40, 3, 30.00),  -- sipariş 50
+(51, 34, 2, 135.00),  -- sipariş 51
+(51, 32, 2, 155.00),  -- sipariş 51
+(51, 37, 3, 65.00),  -- sipariş 51
+(52, 11, 2, 160.00),  -- sipariş 52
+(52, 17, 1, 165.00),  -- sipariş 52
+(53, 39, 1, 75.00),  -- sipariş 53
+(53, 34, 2, 135.00),  -- sipariş 53
+(53, 38, 2, 85.00),  -- sipariş 53
+(54, 33, 1, 195.00),  -- sipariş 54
+(54, 39, 2, 75.00),  -- sipariş 54
+(55, 19, 1, 35.00),  -- sipariş 55
+(56, 26, 2, 70.00),  -- sipariş 56
+(56, 30, 2, 40.00),  -- sipariş 56
+(57, 39, 1, 75.00),  -- sipariş 57
+(57, 31, 3, 140.00),  -- sipariş 57
+(57, 36, 1, 60.00),  -- sipariş 57
+(58, 13, 2, 210.00),  -- sipariş 58
+(58, 14, 3, 175.00),  -- sipariş 58
+(58, 12, 1, 190.00),  -- sipariş 58
+(59, 30, 2, 40.00),  -- sipariş 59
+(59, 22, 1, 260.00),  -- sipariş 59
+(59, 23, 3, 250.00),  -- sipariş 59
+(60, 34, 1, 135.00),  -- sipariş 60
+(60, 32, 3, 155.00),  -- sipariş 60
+(60, 40, 2, 30.00);  -- sipariş 60
+GO
+
+INSERT INTO OrderDetails (OrderID, ProductID, Quantity, UnitPrice) VALUES
+(61, 7, 3, 120.00),  -- sipariş 61
+(61, 6, 3, 55.00),  -- sipariş 61
+(61, 1, 2, 180.00),  -- sipariş 61
+(62, 8, 2, 45.00),  -- sipariş 62
+(62, 3, 1, 150.00),  -- sipariş 62
+(63, 47, 2, 135.00),  -- sipariş 63
+(63, 45, 1, 120.00),  -- sipariş 63
+(64, 17, 2, 165.00),  -- sipariş 64
+(64, 16, 2, 185.00),  -- sipariş 64
+(64, 11, 1, 160.00),  -- sipariş 64
+(65, 30, 3, 40.00),  -- sipariş 65
+(65, 25, 1, 320.00),  -- sipariş 65
+(66, 8, 1, 45.00),  -- sipariş 66
+(67, 18, 1, 60.00),  -- sipariş 67
+(67, 19, 1, 35.00),  -- sipariş 67
+(67, 17, 2, 165.00),  -- sipariş 67
+(68, 16, 3, 185.00),  -- sipariş 68
+(68, 18, 2, 60.00),  -- sipariş 68
+(68, 15, 2, 195.00),  -- sipariş 68
+(69, 24, 3, 270.00),  -- sipariş 69
+(69, 22, 1, 260.00),  -- sipariş 69
+(70, 44, 3, 70.00),  -- sipariş 70
+(71, 42, 2, 110.00),  -- sipariş 71
+(71, 44, 1, 70.00),  -- sipariş 71
+(72, 41, 3, 130.00),  -- sipariş 72
+(72, 50, 2, 50.00),  -- sipariş 72
+(73, 40, 2, 30.00),  -- sipariş 73
+(74, 18, 1, 60.00),  -- sipariş 74
+(74, 12, 2, 190.00),  -- sipariş 74
+(75, 5, 1, 210.00),  -- sipariş 75
+(76, 40, 2, 30.00),  -- sipariş 76
+(76, 34, 2, 135.00),  -- sipariş 76
+(76, 37, 2, 65.00),  -- sipariş 76
+(77, 21, 3, 240.00),  -- sipariş 77
+(77, 22, 1, 260.00),  -- sipariş 77
+(77, 24, 2, 270.00),  -- sipariş 77
+(78, 41, 2, 130.00),  -- sipariş 78
+(79, 25, 3, 320.00),  -- sipariş 79
+(80, 34, 2, 135.00),  -- sipariş 80
+(80, 35, 1, 145.00),  -- sipariş 80
+(80, 40, 3, 30.00);  -- sipariş 80
+GO
+
+INSERT INTO OrderDetails (OrderID, ProductID, Quantity, UnitPrice) VALUES
+(81, 27, 1, 80.00),  -- sipariş 81
+(82, 30, 1, 40.00),  -- sipariş 82
+(82, 25, 2, 320.00),  -- sipariş 82
+(82, 28, 3, 230.00),  -- sipariş 82
+(83, 48, 3, 90.00),  -- sipariş 83
+(83, 42, 1, 110.00),  -- sipariş 83
+(84, 24, 3, 270.00),  -- sipariş 84
+(85, 45, 2, 120.00),  -- sipariş 85
+(85, 41, 3, 130.00),  -- sipariş 85
+(85, 43, 3, 65.00),  -- sipariş 85
+(86, 18, 2, 60.00),  -- sipariş 86
+(86, 12, 2, 190.00),  -- sipariş 86
+(87, 7, 2, 120.00),  -- sipariş 87
+(87, 8, 3, 45.00),  -- sipariş 87
+(88, 6, 2, 55.00),  -- sipariş 88
+(89, 39, 1, 75.00),  -- sipariş 89
+(90, 34, 3, 135.00),  -- sipariş 90
+(91, 35, 3, 145.00),  -- sipariş 91
+(92, 31, 3, 140.00),  -- sipariş 92
+(93, 47, 1, 135.00),  -- sipariş 93
+(93, 42, 2, 110.00),  -- sipariş 93
+(93, 44, 1, 70.00),  -- sipariş 93
+(94, 25, 2, 320.00),  -- sipariş 94
+(94, 27, 1, 80.00),  -- sipariş 94
+(94, 28, 2, 230.00),  -- sipariş 94
+(95, 43, 2, 65.00),  -- sipariş 95
+(95, 42, 2, 110.00),  -- sipariş 95
+(95, 45, 3, 120.00),  -- sipariş 95
+(96, 28, 3, 230.00),  -- sipariş 96
+(96, 23, 2, 250.00),  -- sipariş 96
+(96, 30, 2, 40.00),  -- sipariş 96
+(97, 34, 3, 135.00),  -- sipariş 97
+(97, 40, 2, 30.00),  -- sipariş 97
+(98, 38, 2, 85.00),  -- sipariş 98
+(98, 37, 3, 65.00),  -- sipariş 98
+(99, 17, 1, 165.00),  -- sipariş 99
+(100, 1, 2, 180.00),  -- sipariş 100
+(100, 3, 3, 150.00);  -- sipariş 100
+GO
+
+-- TESLİMAT: Nihai durumu teslim olan siparişleri 'Teslim Edildi' yap.
+-- Bu UPDATE, trg_OrderDelivered_UpdateRevenue'ı tetikler -> ciro birikir.
+-- (Trigger set-based olduğu için aynı restoranın birden çok siparişi
+--  bu tek UPDATE'te doğru toplanır.)
+UPDATE Orders
+    SET OrderStatus = N'Teslim Edildi'
+WHERE OrderID IN (1, 2, 4, 6, 7, 9, 12, 13, 14, 16, 17, 20, 21, 22, 23, 26, 28, 30, 31, 32, 33, 36, 38, 40, 41, 42, 43, 44, 45, 49, 50, 52, 53, 54, 55, 56, 57, 59, 61, 62, 63, 66, 68, 70, 71, 73, 75, 77, 82, 83, 86, 87, 89, 92, 93, 94, 95, 96, 98, 99);
+GO
+
+-- Bilgi: Toplam askıda sipariş tutarı = 815.00 TL (havuz 5800 -> kalan 4985.00).
+-- Teslim edilen sipariş sayısı = 60.
