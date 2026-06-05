@@ -28,6 +28,13 @@ GO
 --   Bu iki koşul birlikte "yeni teslim edilen" siparişi tespit eder.
 --   "Teslim Edildi" -> "Teslim Edildi" güncellemesi (idempotent UPDATE)
 --   yanlışlıkla ciroyu ikiye katlamaz.
+--
+-- ÖNEMLİ (set-based doğruluk): Aynı UPDATE ifadesi, AYNI restorana ait
+-- BİRDEN ÇOK siparişi birden 'Teslim Edildi' yapabilir (toplu güncelleme).
+-- SQL Server'da "UPDATE ... FROM" çoka-bir join'de hedef satırı yalnızca
+-- BİR eşleşen değerle günceller (tutarları TOPLAMAZ). Bu yüzden önce
+-- inserted'ı RestaurantID'ye göre GROUP BY + SUM ile toplayıp, restoran
+-- başına TEK bir toplam tutar üretiyoruz; ciroya onu ekliyoruz.
 CREATE OR ALTER TRIGGER trg_OrderDelivered_UpdateRevenue
 ON Orders
 AFTER UPDATE
@@ -40,12 +47,18 @@ BEGIN
     IF NOT UPDATE(OrderStatus) RETURN;
 
     UPDATE r
-        SET r.TotalRevenue = r.TotalRevenue + i.TotalAmount
+        SET r.TotalRevenue = r.TotalRevenue + agg.EklenecekTutar
     FROM Restaurants AS r
-    INNER JOIN inserted AS i ON i.RestaurantID = r.RestaurantID
-    INNER JOIN deleted  AS d ON d.OrderID      = i.OrderID
-    WHERE i.OrderStatus = 'Teslim Edildi'
-      AND d.OrderStatus <> 'Teslim Edildi';
+    INNER JOIN (
+        -- Yeni teslim edilen siparişleri restorana göre topla.
+        SELECT i.RestaurantID,
+               SUM(i.TotalAmount) AS EklenecekTutar
+        FROM inserted AS i
+        INNER JOIN deleted AS d ON d.OrderID = i.OrderID
+        WHERE i.OrderStatus = 'Teslim Edildi'    -- yeni durum: teslim
+          AND d.OrderStatus <> 'Teslim Edildi'   -- eski durum: teslim değildi
+        GROUP BY i.RestaurantID
+    ) AS agg ON agg.RestaurantID = r.RestaurantID;
 END;
 GO
 
